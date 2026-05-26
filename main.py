@@ -1,20 +1,30 @@
+import logging
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-import os
 
 from backend.database.database import engine
 from backend.models.models import Base
 from backend.routers import auth, productos, pedidos, pagos, admin
 from backend.routers.extras import router_divisas, router_contacto
 
-# Crear todas las tablas en la BD
-Base.metadata.create_all(bind=engine)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Sembrar datos de prueba al iniciar (útil en hosting gratuito)
-from backend.seed import seed as seed_database
-seed_database()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    from backend.seed import seed as seed_database
+    try:
+        seed_database()
+        logger.info("Seed ejecutado correctamente")
+    except Exception as e:
+        logger.error("Error al ejecutar seed: %s", e)
+    yield
 
 app = FastAPI(
     title="FERREMAS API",
@@ -34,18 +44,17 @@ Sistema desarrollado para la distribuidora de productos de ferretería y constru
     """,
     version="1.0.0",
     contact={"name": "Equipo de Desarrollo", "email": "dev@ferremas.cl"},
+    lifespan=lifespan,
 )
 
-# CORS – permite que el frontend (mismo servidor o localhost) llame a la API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # En producción: especificar dominios
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Registrar routers
 app.include_router(auth.router,            prefix="/api")
 app.include_router(productos.router,       prefix="/api")
 app.include_router(pedidos.router,         prefix="/api")
@@ -54,7 +63,6 @@ app.include_router(admin.router,           prefix="/api")
 app.include_router(router_divisas,         prefix="/api")
 app.include_router(router_contacto,        prefix="/api")
 
-# Servir frontend estático
 frontend_path = os.path.join(os.path.dirname(__file__), "frontend", "static")
 if os.path.exists(frontend_path):
     app.mount("/static", StaticFiles(directory=frontend_path), name="static")
